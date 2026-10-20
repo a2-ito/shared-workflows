@@ -1,0 +1,56 @@
+name: CodeQL
+
+# 自分たちが書いたコードの脆弱性（SSRF、XSS、インジェクション、Actions の危ない書き方など）を
+# CodeQL で調べる再利用ワークフロー。結果は Security タブ（code scanning）に載る。
+#
+# private リポジトリの code scanning は有料（GitHub Code Security）なので、public リポジトリだけで呼ぶ。
+# リポジトリ設定の default setup とは同時に使えない（default setup が有効だと結果の送信が拒まれる）。
+#
+# 呼び出し側の例は README を参照。
+on:
+  workflow_call:
+    inputs:
+      languages:
+        description: >-
+          調べる言語の JSON 配列。例 ["actions","javascript-typescript"]。
+          CodeQL の言語名（actions / c-cpp / csharp / go / java-kotlin / javascript-typescript / python / ruby / rust / swift）
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: codeql (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(inputs.languages) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Go などのコンパイル言語は、ビルドを見て解析する（autobuild）。
+      # それ以外はソースだけで解析できる（none）
+      - name: Choose build mode
+        id: mode
+        env:
+          LANGUAGE: ${{ matrix.language }}
+        run: |
+          case "$LANGUAGE" in
+            go|c-cpp|swift) echo "build-mode=autobuild" >> "$GITHUB_OUTPUT" ;;
+            *) echo "build-mode=none" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ steps.mode.outputs.build-mode }}
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
