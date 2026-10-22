@@ -8,6 +8,12 @@ name: Trivy
 on:
   workflow_call:
     inputs:
+      runs-on:
+        description: >-
+          ジョブを動かすランナーのラベル。private リポジトリは GitHub-hosted の無料枠を使うので、
+          self-hosted に回すときは呼び出し側で vars.RUNNER などを渡す
+        type: string
+        default: ubuntu-latest
       severity:
         description: 失敗させる重大度（カンマ区切り）
         type: string
@@ -28,7 +34,7 @@ env:
 jobs:
   scan:
     name: trivy
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: read
       # 結果を Security タブ（code scanning）に載せる。private リポジトリは有料の機能なので送らない
