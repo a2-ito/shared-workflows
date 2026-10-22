@@ -10,6 +10,12 @@ name: CodeQL
 on:
   workflow_call:
     inputs:
+      runs-on:
+        description: >-
+          ジョブを動かすランナーのラベル。private リポジトリは GitHub-hosted の無料枠を使うので、
+          self-hosted に回すときは呼び出し側で vars.RUNNER などを渡す
+        type: string
+        default: ubuntu-latest
       languages:
         description: >-
           調べる言語の JSON 配列。例 ["actions","javascript-typescript"]。
@@ -23,7 +29,7 @@ permissions:
 jobs:
   analyze:
     name: codeql (${{ matrix.language }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs-on }}
     permissions:
       contents: read
       security-events: write

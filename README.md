@@ -46,6 +46,7 @@ jobs:
       security-events: write
 ```
 
+- `runs-on` でランナーを変えられる（既定 `ubuntu-latest`）。a2ito の private リポジトリは `${{ vars.RUNNER || 'ubuntu-latest' }}` を渡し、org の変数 `RUNNER` で self-hosted に回す
 - `languages` は CodeQL の言語名の JSON 配列。`security.yml` を置くと `.github/workflows` ができるので、`actions` はいつも入れる
 - Go などのコンパイル言語は autobuild、それ以外はビルドせずに解析する
 - CodeQL はリポジトリ設定の default setup と同時に使えない。default setup は無効（not-configured）にしておく
