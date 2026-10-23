@@ -77,6 +77,7 @@ jobs:
 ```
 
 - Prettier は既定の設定（スペース 2 つ・ダブルクォート）で、TS/JS・CSS・JSON・YAML・Markdown を見る。外すファイルは `.prettierignore` に書く
+- shfmt はスペース 2 つで見る（Prettier にそろえる）。`.editorconfig` があればそちらに従う
 - ESLint はリポジトリの設定と依存が要るので、各リポジトリの CI で回す
 - Dart は Flutter の版で書式が変わるので、各 Flutter アプリの CI で `dart format --set-exit-if-changed .` を回す
 - 1 つでも引っかかれば失敗する。全部の結果を見られるよう、最後まで回してから落とす（要約に表を出す）
