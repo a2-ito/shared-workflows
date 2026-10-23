@@ -1,0 +1,19 @@
+name: CI
+
+# このリポジトリ自身に lint をかける。PR では変更した再利用ワークフローそのものが動くので、
+# 他のリポジトリに広がる前にここで壊れていないか確かめられる。
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml

@@ -2,10 +2,11 @@
 
 a2-ito / a2ito の全リポジトリで共有する GitHub Actions の再利用ワークフロー。
 
-| ワークフロー | 調べるもの | 対象 |
-| --- | --- | --- |
-| [trivy.yml](.github/workflows/trivy.yml) | 依存の脆弱性（lockfile）、IaC の設定ミス、秘密情報のコミット | 全リポジトリ |
-| [codeql.yml](.github/workflows/codeql.yml) | 自分たちが書いたコードの脆弱性（SSRF、XSS、インジェクション、Actions の危ない書き方など） | public リポジトリだけ |
+| ワークフロー                               | 調べるもの                                                                                                                                                          | 対象                  |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| [trivy.yml](.github/workflows/trivy.yml)   | 依存の脆弱性（lockfile）、IaC の設定ミス、秘密情報のコミット                                                                                                        | 全リポジトリ          |
+| [lint.yml](.github/workflows/lint.yml)     | formatter と linter（Prettier・gofmt / go vet・ruff・terraform fmt / tflint・shfmt / shellcheck・hadolint・actionlint）。ファイルの種類を見て当てはまるものだけ回す | 全リポジトリ          |
+| [codeql.yml](.github/workflows/codeql.yml) | 自分たちが書いたコードの脆弱性（SSRF、XSS、インジェクション、Actions の危ない書き方など）                                                                           | public リポジトリだけ |
 
 - **Trivy** は HIGH 以上が見つかったら失敗する。public リポジトリでは、全重大度の結果を Security タブ（code scanning）にも載せる。private リポジトリの code scanning は有料（GitHub Code Security）なので、失敗させるだけにしている
 - **CodeQL** は private リポジトリでは動かない（同じく有料）。Dart（Flutter）など CodeQL が対応していない言語は調べられない
@@ -51,6 +52,34 @@ jobs:
 - Go などのコンパイル言語は autobuild、それ以外はビルドせずに解析する
 - CodeQL はリポジトリ設定の default setup と同時に使えない。default setup は無効（not-configured）にしておく
 - `@main` で呼ぶので、このリポジトリの main を変えると全リポジトリに効く。main には ruleset で直 push できず、PR を通す
+
+## lint の呼び出し方
+
+各リポジトリに `.github/workflows/lint.yml` を置く。
+
+```yaml
+name: Lint
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: a2-ito/shared-workflows/.github/workflows/lint.yml@main
+    # a2ito の private リポジトリは self-hosted に回す
+    # with:
+    #   runs-on: ${{ vars.RUNNER || 'ubuntu-latest' }}
+```
+
+- Prettier は既定の設定（スペース 2 つ・ダブルクォート）で、TS/JS・CSS・JSON・YAML・Markdown を見る。外すファイルは `.prettierignore` に書く
+- ESLint はリポジトリの設定と依存が要るので、各リポジトリの CI で回す
+- Dart は Flutter の版で書式が変わるので、各 Flutter アプリの CI で `dart format --set-exit-if-changed .` を回す
+- 1 つでも引っかかれば失敗する。全部の結果を見られるよう、最後まで回してから落とす（要約に表を出す）
 
 ## Trivy の版を上げる
 

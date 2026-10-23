@@ -1,0 +1,216 @@
+name: Lint
+
+# 言語ごとの formatter と linter を、リポジトリにあるファイルの種類を見て当てはまるものだけ回す
+# 再利用ワークフロー。1 つでも引っかかれば失敗するが、全部の結果を見られるよう最後まで回してから落とす。
+#
+# | 対象                | linter      | formatter                  |
+# | ------------------- | ----------- | -------------------------- |
+# | TS/JS・CSS・JSON・YAML・Markdown | ―（ESLint は各リポジトリの CI） | Prettier（既定の設定） |
+# | Go                  | go vet      | gofmt                      |
+# | Python              | ruff check  | ruff format                |
+# | Terraform           | tflint      | terraform fmt              |
+# | Shell（*.sh）       | shellcheck  | shfmt                      |
+# | Dockerfile          | hadolint    | ―                          |
+# | GitHub Actions      | actionlint  | ―                          |
+#
+# ESLint は依存とリポジトリの設定（eslint-config-next など）が要るので、各リポジトリの CI で回す。
+# Dart は Flutter の版で書式が変わるので、各 Flutter アプリの CI（同じ Flutter）で dart format を回す。
+#
+# 外すファイルは、Prettier は .prettierignore（と .gitignore）、それ以外は各ツールの設定ファイルで書く。
+# 呼び出し側の例は README を参照。
+on:
+  workflow_call:
+    inputs:
+      runs-on:
+        description: >-
+          ジョブを動かすランナーのラベル。private リポジトリは GitHub-hosted の無料枠を使うので、
+          self-hosted に回すときは呼び出し側で vars.RUNNER などを渡す
+        type: string
+        default: ubuntu-latest
+
+permissions:
+  contents: read
+
+env:
+  # 版はここで固定する。上げるときは版とチェックサムを一緒に変える。
+  # Action はタグが書き換えられると中身が変わるので、単体のバイナリは公式のリリースを
+  # チェックサムで確かめてから使う（shellcheck と shfmt は公式のチェックサムが無いので、取得時に計ったもの）
+  PRETTIER_VERSION: 3.9.10
+  RUFF_VERSION: 0.17.2
+  TERRAFORM_VERSION: 1.16.6
+  ACTIONLINT_VERSION: 1.7.12
+  ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+  SHELLCHECK_VERSION: 0.11.0
+  SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+  SHFMT_VERSION: 3.14.1
+  SHFMT_SHA256: 76e77641faa025814b77f153b29796b8e6fa2fca03e0c76a691608b86c7ea7bf
+  HADOLINT_VERSION: 2.15.1
+  HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+  TFLINT_VERSION: 0.64.0
+  TFLINT_SHA256: cca9d13e2e1d7a2c627af60ff899a3c9b74212899416aeb96ec764d2ef954537
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ${{ inputs.runs-on }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # 追跡しているファイルから、回すツールを決める
+      - name: Detect file types
+        id: detect
+        run: |
+          set -euo pipefail
+          has() { if git ls-files -- "$@" | grep -q .; then echo true; else echo false; fi; }
+          {
+            echo "prettier=$(has '*.ts' '*.tsx' '*.js' '*.jsx' '*.mjs' '*.cjs' '*.css' '*.json' '*.yml' '*.yaml' '*.md')"
+            echo "go=$(has '*.go')"
+            echo "python=$(has '*.py')"
+            echo "terraform=$(has '*.tf')"
+            echo "shell=$(has '*.sh' '*.bash')"
+            echo "docker=$(has '*Dockerfile' '*Dockerfile.*' '*.Dockerfile')"
+            echo "actions=$(has '.github/workflows/*.yml' '.github/workflows/*.yaml')"
+          } | tee -a "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Install linters
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          fetch() { curl -fsSL -o "$2" "$1" && echo "$3  $2" | sha256sum -c -; }
+          if [ "${{ steps.detect.outputs.actions }}" = true ]; then
+            fetch "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint.tar.gz "$ACTIONLINT_SHA256"
+            tar xzf actionlint.tar.gz -C bin actionlint
+          fi
+          # actionlint も run: の中のスクリプトを shellcheck で見るので、Actions があれば入れる
+          if [ "${{ steps.detect.outputs.shell }}" = true ] || [ "${{ steps.detect.outputs.actions }}" = true ]; then
+            fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" shellcheck.tar.xz "$SHELLCHECK_SHA256"
+            tar xJf shellcheck.tar.xz && mv "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" bin/
+          fi
+          if [ "${{ steps.detect.outputs.shell }}" = true ]; then
+            fetch "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64" bin/shfmt "$SHFMT_SHA256"
+            chmod +x bin/shfmt
+          fi
+          if [ "${{ steps.detect.outputs.docker }}" = true ]; then
+            fetch "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64" bin/hadolint "$HADOLINT_SHA256"
+            chmod +x bin/hadolint
+          fi
+          if [ "${{ steps.detect.outputs.terraform }}" = true ]; then
+            fetch "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_amd64.zip" tflint.zip "$TFLINT_SHA256"
+            unzip -oq tflint.zip -d bin
+          fi
+
+      - if: steps.detect.outputs.prettier == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Prettier
+        id: prettier
+        if: steps.detect.outputs.prettier == 'true'
+        continue-on-error: true
+        run: npx --yes "prettier@${PRETTIER_VERSION}" --check .
+
+      - if: steps.detect.outputs.go == 'true'
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache: false
+      - name: gofmt / go vet
+        id: go
+        if: steps.detect.outputs.go == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          status=0
+          unformatted=$(git ls-files -z -- '*.go' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt にかけていないファイル:"; echo "$unformatted"; status=1
+          fi
+          # go.mod のあるディレクトリごとに vet する（toolchain は go.mod の版に合わせて取ってくる）
+          for mod in $(git ls-files -- '*go.mod'); do
+            (cd "$(dirname "$mod")" && go vet ./...) || status=1
+          done
+          exit $status
+
+      - if: steps.detect.outputs.python == 'true'
+        uses: astral-sh/setup-uv@v10.3.2
+      - name: ruff
+        id: python
+        if: steps.detect.outputs.python == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          status=0
+          uvx "ruff@${RUFF_VERSION}" check . || status=1
+          uvx "ruff@${RUFF_VERSION}" format --check . || status=1
+          exit $status
+
+      - if: steps.detect.outputs.terraform == 'true'
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: terraform fmt / tflint
+        id: terraform
+        if: steps.detect.outputs.terraform == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          status=0
+          terraform fmt -check -diff -recursive || status=1
+          tflint --recursive --minimum-failure-severity=warning || status=1
+          exit $status
+
+      - name: shellcheck / shfmt
+        id: shell
+        if: steps.detect.outputs.shell == 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          status=0
+          git ls-files -z -- '*.sh' '*.bash' | xargs -0 shellcheck || status=1
+          # 字下げなどは .editorconfig があればそれに従う（無ければ shfmt の既定）
+          git ls-files -z -- '*.sh' '*.bash' | xargs -0 shfmt -d || status=1
+          exit $status
+
+      - name: hadolint
+        id: docker
+        if: steps.detect.outputs.docker == 'true'
+        continue-on-error: true
+        run: git ls-files -z -- '*Dockerfile' '*Dockerfile.*' '*.Dockerfile' | xargs -0 hadolint
+
+      - name: actionlint
+        id: actions
+        if: steps.detect.outputs.actions == 'true'
+        continue-on-error: true
+        run: actionlint
+
+      # どれか 1 つでも引っかかっていたら落とす。どれが落ちたかを要約にも書く
+      - name: Result
+        env:
+          RESULTS: >-
+            prettier=${{ steps.prettier.outcome }}
+            go=${{ steps.go.outcome }}
+            python=${{ steps.python.outcome }}
+            terraform=${{ steps.terraform.outcome }}
+            shell=${{ steps.shell.outcome }}
+            docker=${{ steps.docker.outcome }}
+            actions=${{ steps.actions.outcome }}
+        run: |
+          set -euo pipefail
+          failed=0
+          {
+            echo "| 対象 | 結果 |"
+            echo "| --- | --- |"
+            for r in $RESULTS; do
+              name=${r%%=*}; outcome=${r#*=}
+              case "$outcome" in
+                success) echo "| $name | ✅ |" ;;
+                failure) echo "| $name | ❌ |"; failed=1 ;;
+                *) echo "| $name | ― |" ;;
+              esac
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"
+          exit $failed
