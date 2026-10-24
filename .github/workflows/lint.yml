@@ -159,7 +159,10 @@ jobs:
           set -uo pipefail
           status=0
           terraform fmt -check -diff -recursive || status=1
-          tflint --recursive --minimum-failure-severity=warning || status=1
+          # --recursive は各ディレクトリの .tflint.hcl しか読まないので、ルートにあれば全ディレクトリに使う
+          config=()
+          if [ -f .tflint.hcl ]; then config=(--config "$PWD/.tflint.hcl"); fi
+          tflint --recursive "${config[@]}" --minimum-failure-severity=warning || status=1
           exit $status
 
       - name: shellcheck / shfmt
@@ -169,13 +172,22 @@ jobs:
         run: |
           set -uo pipefail
           status=0
-          git ls-files -z -- '*.sh' '*.bash' | xargs -0 shellcheck || status=1
+          # zsh のスクリプトは shellcheck も shfmt も読めないので、shebang が zsh のものは外す
+          files=()
+          while IFS= read -r -d '' f; do
+            head -n 1 "$f" | grep -q '^#!.*zsh' || files+=("$f")
+          done < <(git ls-files -z -- '*.sh' '*.bash')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "zsh 以外のシェルスクリプトはありません"
+            exit 0
+          fi
+          shellcheck "${files[@]}" || status=1
           # 字下げは Prettier（スペース 2 つ）にそろえる。shfmt の既定はタブ。
           # .editorconfig があればそちらに従う（-i などの書式の指定を付けると .editorconfig は読まれない）
           if [ -f .editorconfig ]; then
-            git ls-files -z -- '*.sh' '*.bash' | xargs -0 shfmt -d || status=1
+            shfmt -d "${files[@]}" || status=1
           else
-            git ls-files -z -- '*.sh' '*.bash' | xargs -0 shfmt -d -i 2 || status=1
+            shfmt -d -i 2 "${files[@]}" || status=1
           fi
           exit $status
 
@@ -183,7 +195,12 @@ jobs:
         id: docker
         if: steps.detect.outputs.docker == 'true'
         continue-on-error: true
-        run: git ls-files -z -- '*Dockerfile' '*Dockerfile.*' '*.Dockerfile' | xargs -0 hadolint
+        # tflint と同じく warning 以上で落とす（info の「RUN をまとめる」などは見るだけ）。
+        # OS のパッケージの版の固定（apt-get・apk・dnf）は求めない。古い版はミラーから消えてビルドが壊れ、
+        # Renovate でも上げられないため。リポジトリの .hadolint.yaml で足し引きできる
+        run: >-
+          git ls-files -z -- '*Dockerfile' '*Dockerfile.*' '*.Dockerfile' |
+          xargs -0 hadolint --failure-threshold warning --ignore DL3008 --ignore DL3018 --ignore DL3041
 
       - name: actionlint
         id: actions
