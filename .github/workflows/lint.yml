@@ -159,7 +159,10 @@ jobs:
           set -uo pipefail
           status=0
           terraform fmt -check -diff -recursive || status=1
-          tflint --recursive --minimum-failure-severity=warning || status=1
+          # --recursive は各ディレクトリの .tflint.hcl しか読まないので、ルートにあれば全ディレクトリに使う
+          config=()
+          if [ -f .tflint.hcl ]; then config=(--config "$PWD/.tflint.hcl"); fi
+          tflint --recursive "${config[@]}" --minimum-failure-severity=warning || status=1
           exit $status
 
       - name: shellcheck / shfmt
